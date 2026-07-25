@@ -291,6 +291,7 @@
   <a href="https://celestrak.org/satcat/launchsites.php" target="_blank">CelesTrak公式ページ</a> に基づく（本ツールに主要コードのみ組み込み済み。未知のコードはそのまま表示）。<br>
   ・CelesTrakのAPIはブラウザから直接アクセスするとCORS制限で失敗する場合があります。その場合は自動的に外部プロキシ（corsproxy.io → allorigins.win → codetabs の順）で再取得を試みます＝<b>これは推測込みの回避策</b>で、外部の無料サービスに依存するため必ず成功する保証はありません。全て失敗した場合はエラー表示になります。<br>
   ・「打ち上げ日」「打ち上げ場所」はSATCATの登録に依存するため、打ち上げ直後はまだ未登録（空欄）のことがあります。<br>
+  ・2026年7月11日にNORADカタログ番号が5桁の上限（69999）に達し、以降の新規オブジェクトは6桁（100000+）になりました。6桁のオブジェクトはTLE形式では提供されないため、データ取得はJSON形式を主とし、TLE行は取得できた分だけ表示しています（取れない場合は軌道要素を代わりに表示）。<br>
   ・最新性・料金等の制度情報ではありませんが、念のため表示内容は都度ご自身でも一次情報を確認してください。
 </div>
 
@@ -339,8 +340,6 @@ const LAUNCH_SITES = {
   YUN:"西海衛星発射場 (北朝鮮)"
 };
 
-// 各打ち上げ場所コードがどの国・地域に属するか（フィルタ用）。
-// CelesTrak公式の場所コード一覧を元にした分類。洋上/潜水艦発射など国に紐づかないものは「その他」扱い。
 const SITE_COUNTRY = {
   AFETR:"アメリカ", AFWTR:"アメリカ", KODAK:"アメリカ", WLPIS:"アメリカ",
   KWAJ:"アメリカ", CAS:"アメリカ", ERAS:"アメリカ", WRAS:"アメリカ",
@@ -378,7 +377,8 @@ function populateCountrySelect(){
 }
 populateCountrySelect();
 
-const GP_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle";
+const GP_JSON_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=json";
+const GP_TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle";
 const SATCAT_BASE = "https://celestrak.org/satcat/records.php?FORMAT=CSV&INTDES=";
 
 const PROXY_BUILDERS = [
@@ -417,26 +417,54 @@ async function fetchText(url){
   throw new Error("全ての取得方法が失敗しました（直接アクセス＋プロキシ3種）: " + (lastErr ? lastErr.message : "不明"));
 }
 
-function parseTLEBlock(text){
+function parseTLEBlockToMap(text){
   const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-  const records = [];
+  const map = {};
   for(let i=0; i+2 < lines.length; i+=3){
-    const name = lines[i].trim();
     const l1 = lines[i+1];
     const l2 = lines[i+2];
     if(!l1.startsWith("1 ") || !l2.startsWith("2 ")) continue;
     const noradId = l1.substring(2,7).trim();
-    const desigRaw = l1.substring(9,17).trim();
-    let intdes = "";
-    if(desigRaw.length >= 5){
-      const yy = parseInt(desigRaw.substring(0,2),10);
-      const year = yy < 57 ? 2000+yy : 1900+yy;
-      const num = desigRaw.substring(2,5);
-      intdes = year + "-" + num;
-    }
-    records.push({ noradId, name, l1, l2, intdes, launchDate:"", launchSite:"" });
+    map[noradId] = { l1, l2 };
   }
-  return records;
+  return map;
+}
+
+function parseGPJson(text){
+  let data;
+  try{
+    data = JSON.parse(text);
+  }catch(e){
+    throw new Error("JSON解析に失敗しました");
+  }
+  if(!Array.isArray(data)) throw new Error("想定外のJSON形式です");
+
+  return data.map(obj=>{
+    const noradId = String(obj.NORAD_CAT_ID || "").trim();
+    const objectId = String(obj.OBJECT_ID || "").trim();
+    let intdes = "";
+    const m = objectId.match(/^(\d{4}-\d{3})/);
+    if(m) intdes = m[1];
+    return {
+      noradId,
+      name: (obj.OBJECT_NAME || "").trim(),
+      intdes,
+      is6digit: noradId.length > 5,
+      omm: {
+        epoch: obj.EPOCH || "",
+        inclination: obj.INCLINATION,
+        eccentricity: obj.ECCENTRICITY,
+        meanMotion: obj.MEAN_MOTION,
+        raan: obj.RA_OF_ASC_NODE,
+        argPerigee: obj.ARG_OF_PERICENTER
+      },
+      l1: "",
+      l2: "",
+      hasTLE: false,
+      launchDate: "",
+      launchSite: ""
+    };
+  });
 }
 
 function parseCSV(text){
@@ -510,11 +538,28 @@ async function runUpdate(){
   document.getElementById("countLine").style.display = "none";
 
   try{
-    const tleText = await fetchText(GP_URL);
-    const records = parseTLEBlock(tleText);
+    const jsonText = await fetchText(GP_JSON_URL);
+    const records = parseGPJson(jsonText);
     if(records.length === 0){
-      throw new Error("TLEデータを解析できませんでした（0件）");
+      throw new Error("データを解析できませんでした（0件）");
     }
+
+    let tleMap = {};
+    let tleFailed = false;
+    try{
+      const tleText = await fetchText(GP_TLE_URL);
+      tleMap = parseTLEBlockToMap(tleText);
+    }catch(e){
+      tleFailed = true;
+    }
+    records.forEach(r=>{
+      const t = tleMap[r.noradId];
+      if(t){
+        r.l1 = t.l1;
+        r.l2 = t.l2;
+        r.hasTLE = true;
+      }
+    });
 
     const uniqueIntdes = [...new Set(records.map(r=>r.intdes).filter(Boolean))];
     const satcatMap = {};
@@ -546,6 +591,8 @@ async function runUpdate(){
     const failedSatcat = results.filter(r=>r.status==="rejected").length;
     if(failedSatcat > 0){
       showBanner("一部の打ち上げ（"+failedSatcat+"件）について打ち上げ日・場所の取得に失敗しました。再度「更新」を試してください。", true);
+    } else if(tleFailed){
+      showBanner("TLE行の取得に失敗しました（軌道要素・打ち上げ日/場所は表示できています）。再度「更新」で改善する場合があります。", false);
     } else if(lastSuccessMethod && lastSuccessMethod !== "直接アクセス"){
       showBanner("CelesTrakへの直接アクセスがブロックされたため、外部プロキシ経由（"+lastSuccessMethod+"）で取得しました。プロキシは不安定な外部サービスのため、失敗する日もあります。", false);
     }
@@ -640,10 +687,20 @@ function renderCards(list, totalFiltered){
       ? (LAUNCH_SITES[r.launchSite] ? LAUNCH_SITES[r.launchSite] + " ["+r.launchSite+"]" : r.launchSite + "（コード未登録）")
       : "（未登録）";
 
+    const tleSection = r.hasTLE
+      ? `<div class="tle-block">${r.l1}<br>${r.l2}</div>
+         <button class="copy-btn" data-tle="${escapeAttr(r.l1+"\\n"+r.l2)}">TLEをコピー</button>`
+      : `<div class="tle-block">
+           ⚠ TLE形式非対応（6桁カタログ番号のため）<br>
+           軌道傾斜角: ${r.omm.inclination ?? "-"}°　離心率: ${r.omm.eccentricity ?? "-"}<br>
+           平均運動: ${r.omm.meanMotion ?? "-"} rev/day　元期: ${escapeHtml(r.omm.epoch || "-")}
+         </div>`;
+
     card.innerHTML = `
       <div class="card-top">
         <span class="card-name">${escapeHtml(r.name)}</span>
         ${isFresh ? '<span class="fresh-tag">48h以内</span>' : ''}
+        ${r.is6digit ? '<span class="fresh-tag" style="color:var(--accent);border-color:var(--accent);">新形式(6桁)</span>' : ''}
       </div>
       <div class="meta-grid">
         <div><div class="k">NORAD ID</div><div class="v">${r.noradId}</div></div>
@@ -651,8 +708,7 @@ function renderCards(list, totalFiltered){
         <div><div class="k">打ち上げ日</div><div class="v">${r.launchDate ? r.launchDate.substring(0,10) : "（未登録）"}</div></div>
         <div><div class="k">打ち上げ場所</div><div class="v">${siteLabel}</div></div>
       </div>
-      <div class="tle-block">${r.l1}<br>${r.l2}</div>
-      <button class="copy-btn" data-tle="${escapeAttr(r.l1+"\\n"+r.l2)}">TLEをコピー</button>
+      ${tleSection}
     `;
     wrap.appendChild(card);
   });
