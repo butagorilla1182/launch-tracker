@@ -122,7 +122,7 @@
   }
   .field{display:flex; flex-direction:column; gap:4px;}
   .field label{font-size:11px; color:var(--muted); letter-spacing:.03em;}
-  .field input{
+  .field input, .field select{
     background:var(--panel2);
     border:1px solid var(--line);
     color:var(--text);
@@ -132,7 +132,7 @@
     font-family:var(--mono);
     width:100%;
   }
-  .field input:focus{outline:1px solid var(--accent); border-color:var(--accent);}
+  .field input:focus, .field select:focus{outline:1px solid var(--accent); border-color:var(--accent);}
   .date-range{display:flex; gap:8px;}
   .date-range .field{flex:1;}
   .clear-btn{
@@ -269,6 +269,12 @@
     <input type="text" id="idSearch" placeholder="例: 63472 の一部でも可" inputmode="numeric">
   </div>
   <div class="field">
+    <label>打ち上げ国・地域</label>
+    <select id="countrySelect">
+      <option value="">すべて</option>
+    </select>
+  </div>
+  <div class="field">
     <label>表示件数（未入力時は10件）</label>
     <input type="number" id="limitInput" min="1" placeholder="10">
   </div>
@@ -332,6 +338,45 @@ const LAUNCH_SITES = {
   YSLA:"黄海洋上射場 (中国)",
   YUN:"西海衛星発射場 (北朝鮮)"
 };
+
+// 各打ち上げ場所コードがどの国・地域に属するか（フィルタ用）。
+// CelesTrak公式の場所コード一覧を元にした分類。洋上/潜水艦発射など国に紐づかないものは「その他」扱い。
+const SITE_COUNTRY = {
+  AFETR:"アメリカ", AFWTR:"アメリカ", KODAK:"アメリカ", WLPIS:"アメリカ",
+  KWAJ:"アメリカ", CAS:"アメリカ", ERAS:"アメリカ", WRAS:"アメリカ",
+  ANDSP:"ノルウェー",
+  ALCLC:"ブラジル",
+  BOS:"オーストラリア", WOMRA:"オーストラリア",
+  DLS:"ロシア", KYMSC:"ロシア", PLMSC:"ロシア", SVOBO:"ロシア", VOSTO:"ロシア",
+  FRGUI:"フランス",
+  HGSTR:"アルジェリア",
+  JJSLA:"韓国", NSC:"韓国",
+  JSC:"中国", SCSLA:"中国", TAISC:"中国", WSC:"中国", XICLF:"中国", YSLA:"中国",
+  KSCUT:"日本", SPKII:"日本", TANSC:"日本",
+  RLLB:"ニュージーランド",
+  SEMLS:"イラン", SMTS:"イラン",
+  SNMLP:"イタリア",
+  SRILR:"インド",
+  TYMSC:"カザフスタン",
+  YAVNE:"イスラエル",
+  YUN:"北朝鮮",
+  SEAL:"その他（洋上）", SUBL:"その他（洋上）",
+  UNK:"不明"
+};
+
+function populateCountrySelect(){
+  const sel = document.getElementById("countrySelect");
+  if(sel.dataset.filled === "1") return;
+  const countries = [...new Set(Object.values(SITE_COUNTRY))].sort((a,b)=>a.localeCompare(b,"ja"));
+  countries.forEach(c=>{
+    const opt = document.createElement("option");
+    opt.value = c;
+    opt.textContent = c;
+    sel.appendChild(opt);
+  });
+  sel.dataset.filled = "1";
+}
+populateCountrySelect();
 
 const GP_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle";
 const SATCAT_BASE = "https://celestrak.org/satcat/records.php?FORMAT=CSV&INTDES=";
@@ -522,6 +567,7 @@ function clearFilters(){
   document.getElementById("dateTo").value = "";
   document.getElementById("idSearch").value = "";
   document.getElementById("limitInput").value = "";
+  document.getElementById("countrySelect").value = "";
   applyFilters();
 }
 
@@ -529,6 +575,7 @@ function applyFilters(){
   const from = document.getElementById("dateFrom").value;
   const to = document.getElementById("dateTo").value;
   const idQuery = document.getElementById("idSearch").value.trim();
+  const country = document.getElementById("countrySelect").value;
 
   let filtered = allRecords.filter(r=>{
     if(idQuery && !r.noradId.includes(idQuery)) return false;
@@ -537,6 +584,10 @@ function applyFilters(){
     }
     if(to && r.launchDate){
       if(r.launchDate.substring(0,10) > to) return false;
+    }
+    if(country){
+      const c = SITE_COUNTRY[r.launchSite] || "不明";
+      if(c !== country) return false;
     }
     return true;
   });
@@ -630,6 +681,7 @@ document.getElementById("dateFrom").addEventListener("change", applyFilters);
 document.getElementById("dateTo").addEventListener("change", applyFilters);
 document.getElementById("idSearch").addEventListener("input", applyFilters);
 document.getElementById("limitInput").addEventListener("input", applyFilters);
+document.getElementById("countrySelect").addEventListener("change", applyFilters);
 
 window.addEventListener("DOMContentLoaded", runUpdate);
 </script>
