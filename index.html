@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>直近打ち上げオブジェクト・トラッカー</title>
+<style>
+  :root{
+    --bg:#090c11;
+    --panel:#10141b;
+    --panel2:#141a23;
+    --line:#232b38;
+    --text:#e6ebf2;
+    --muted:#7d8899;
+    --accent:#4ce0c7;
+    --accent-dim:#2a6b62;
+    --warn:#f5a623;
+    --danger:#e2585a;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Roboto Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    padding:0 0 60px;
+  }
+  header{
+    position:relative;
+    padding:22px 18px 18px;
+    border-bottom:1px solid var(--line);
+    overflow:hidden;
+    background:linear-gradient(180deg, #0d1119 0%, #090c11 100%);
+  }
+  header::after{
+    content:"";
+    position:absolute;
+    left:-100%;
+    top:0;
+    width:100%;
+    height:2px;
+    background:linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation:sweep 5s linear infinite;
+    opacity:.6;
+  }
+  @keyframes sweep{
+    0%{left:-100%;}
+    100%{left:200%;}
+  }
+  h1{
+    font-size:17px;
+    margin:0 0 4px;
+    letter-spacing:.02em;
+    font-weight:700;
+  }
+  .sub{
+    font-size:12px;
+    color:var(--muted);
+    font-family:var(--mono);
+  }
+  .status-row{
+    margin-top:12px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  button.refresh{
+    background:var(--accent);
+    color:#04211d;
+    border:none;
+    font-weight:700;
+    font-size:13px;
+    padding:9px 16px;
+    border-radius:6px;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+  }
+  button.refresh:disabled{
+    opacity:.55;
+    cursor:default;
+  }
+  button.refresh:active{transform:translateY(1px);}
+  .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--muted);
+    flex:0 0 auto;
+  }
+  .dot.ok{background:var(--accent); box-shadow:0 0 6px var(--accent);}
+  .dot.err{background:var(--danger); box-shadow:0 0 6px var(--danger);}
+  .status-text{font-size:12px; color:var(--muted); font-family:var(--mono);}
+  .banner{
+    margin:12px 18px 0;
+    padding:10px 12px;
+    border:1px solid var(--warn);
+    background:rgba(245,166,35,.08);
+    color:var(--warn);
+    font-size:12px;
+    border-radius:6px;
+    line-height:1.5;
+    display:none;
+  }
+  .banner.show{display:block;}
+  .banner.error{
+    border-color:var(--danger);
+    background:rgba(226,88,90,.08);
+    color:#ffb3b3;
+  }
+  .controls{
+    margin:16px 18px 0;
+    padding:12px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:8px;
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+  }
+  .field{display:flex; flex-direction:column; gap:4px;}
+  .field label{font-size:11px; color:var(--muted); letter-spacing:.03em;}
+  .field input{
+    background:var(--panel2);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:8px 9px;
+    border-radius:6px;
+    font-size:13px;
+    font-family:var(--mono);
+    width:100%;
+  }
+  .field input:focus{outline:1px solid var(--accent); border-color:var(--accent);}
+  .date-range{display:flex; gap:8px;}
+  .date-range .field{flex:1;}
+  .clear-btn{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--muted);
+    font-size:12px;
+    padding:8px 10px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+  .count-line{
+    margin:12px 18px 6px;
+    font-size:12px;
+    color:var(--muted);
+    font-family:var(--mono);
+    display:flex;
+    justify-content:space-between;
+  }
+  .cards{
+    margin:0 18px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .card{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-left:3px solid var(--line);
+    border-radius:8px;
+    padding:12px 13px;
+  }
+  .card.fresh{border-left-color:var(--warn);}
+  .card-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .card-name{font-size:14px; font-weight:700;}
+  .fresh-tag{
+    font-size:10px;
+    color:var(--warn);
+    border:1px solid var(--warn);
+    padding:1px 6px;
+    border-radius:10px;
+    font-family:var(--mono);
+  }
+  .meta-grid{
+    margin-top:8px;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px 12px;
+    font-size:12px;
+  }
+  .meta-grid .k{color:var(--muted); font-family:var(--mono); font-size:10.5px;}
+  .meta-grid .v{font-family:var(--mono);}
+  .tle-block{
+    margin-top:9px;
+    background:#050709;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:8px 9px;
+    font-family:var(--mono);
+    font-size:11px;
+    line-height:1.6;
+    color:#9fe8d9;
+    word-break:break-all;
+    position:relative;
+  }
+  .copy-btn{
+    margin-top:6px;
+    background:var(--panel2);
+    border:1px solid var(--line);
+    color:var(--muted);
+    font-size:11px;
+    padding:5px 9px;
+    border-radius:5px;
+    cursor:pointer;
+  }
+  .copy-btn:active{color:var(--accent); border-color:var(--accent);}
+  .empty, .loading{
+    margin:30px 18px;
+    text-align:center;
+    color:var(--muted);
+    font-size:13px;
+    font-family:var(--mono);
+  }
+  .note{
+    margin:22px 18px 0;
+    padding:11px 12px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    font-size:11.5px;
+    color:var(--muted);
+    line-height:1.7;
+  }
+  .note a{color:var(--accent);}
+  .note b{color:var(--text);}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🛰 直近打ち上げオブジェクト・トラッカー</h1>
+  <div class="sub">CelesTrak GP data (last-30-days) + SATCAT</div>
+  <div class="status-row">
+    <button class="refresh" id="refreshBtn" onclick="runUpdate()">更新</button>
+    <span class="dot" id="statusDot"></span>
+    <span class="status-text" id="statusText">未取得</span>
+  </div>
+  <div class="status-row">
+    <button class="clear-btn" id="diagBtn" onclick="runDiagnostic()" style="font-size:11px;">🔧 接続診断（外部通信できるか確認）</button>
+  </div>
+</header>
+
+<div class="banner" id="banner"></div>
+<div class="banner" id="diagBanner" style="font-family:var(--mono); white-space:pre-wrap;"></div>
+
+<div class="controls">
+  <div class="date-range">
+    <div class="field">
+      <label>打ち上げ日（開始）</label>
+      <input type="date" id="dateFrom">
+    </div>
+    <div class="field">
+      <label>打ち上げ日（終了）</label>
+      <input type="date" id="dateTo">
+    </div>
+  </div>
+  <div class="field">
+    <label>オブジェクト番号（NORAD ID）で検索</label>
+    <input type="text" id="idSearch" placeholder="例: 63472 の一部でも可" inputmode="numeric">
+  </div>
+  <div class="field">
+    <label>表示件数（未入力時は10件）</label>
+    <input type="number" id="limitInput" min="1" placeholder="10">
+  </div>
+  <button class="clear-btn" onclick="clearFilters()">フィルタをクリア</button>
+</div>
+
+<div class="count-line" id="countLine" style="display:none;"></div>
+<div class="cards" id="cards"></div>
+<div class="empty" id="emptyMsg" style="display:none;">「更新」を押すとデータを取得します</div>
+
+<div class="note">
+  <b>この画面について（事実・注意点）</b><br>
+  ・データ取得元は CelesTrak の公開API（GP data / SATCAT）。打ち上げ場所コードの正式な意味は
+  <a href="https://celestrak.org/satcat/launchsites.php" target="_blank">CelesTrak公式ページ</a> に基づく（本ツールに主要コードのみ組み込み済み。未知のコードはそのまま表示）。<br>
+  ・CelesTrakのAPIはブラウザから直接アクセスするとCORS制限で失敗する場合があります。その場合は自動的に外部プロキシ（corsproxy.io → allorigins.win → codetabs の順）で再取得を試みます＝<b>これは推測込みの回避策</b>で、外部の無料サービスに依存するため必ず成功する保証はありません。全て失敗した場合はエラー表示になります。<br>
+  ・「打ち上げ日」「打ち上げ場所」はSATCATの登録に依存するため、打ち上げ直後はまだ未登録（空欄）のことがあります。<br>
+  ・最新性・料金等の制度情報ではありませんが、念のため表示内容は都度ご自身でも一次情報を確認してください。
+</div>
+
+<script>
+const LAUNCH_SITES = {
+  AFETR:"Cape Canaveral (米・フロリダ)",
+  AFWTR:"Vandenberg (米・カリフォルニア)",
+  ANDSP:"Andøya (ノルウェー)",
+  ALCLC:"アルカンタラ (ブラジル)",
+  BOS:"Bowen Orbital Spaceport (豪)",
+  CAS:"Canaries Airspace",
+  DLS:"Dombarovskiy (ロシア)",
+  ERAS:"Eastern Range Airspace",
+  FRGUI:"クールー (仏領ギアナ)",
+  HGSTR:"Hammaguira (アルジェリア)",
+  JJSLA:"済州島洋上射場 (韓国)",
+  JSC:"酒泉衛星発射センター (中国)",
+  KODAK:"Kodiak (米・アラスカ)",
+  KSCUT:"内之浦宇宙空間観測所 (日本)",
+  KWAJ:"クェゼリン環礁 (米軍)",
+  KYMSC:"Kapustin Yar (ロシア)",
+  NSC:"羅老宇宙センター (韓国)",
+  PLMSC:"プレセツク (ロシア)",
+  RLLB:"Mahia (ニュージーランド／Rocket Lab)",
+  SCSLA:"南シナ海洋上射場 (中国)",
+  SEAL:"Sea Launch (洋上プラットフォーム)",
+  SEMLS:"Semnan (イラン)",
+  SMTS:"Shahrud (イラン)",
+  SNMLP:"San Marco (ケニア沖)",
+  SPKII:"Space Port Kii (日本)",
+  SRILR:"サティシュ・ダワン宇宙センター (インド)",
+  SUBL:"潜水艦発射 (洋上)",
+  SVOBO:"スヴォボードヌイ (ロシア)",
+  TAISC:"太原衛星発射センター (中国)",
+  TANSC:"種子島宇宙センター (日本)",
+  TYMSC:"バイコヌール (カザフスタン)",
+  UNK:"不明",
+  VOSTO:"ヴォストーチヌイ (ロシア)",
+  WLPIS:"ワロップス島 (米・バージニア)",
+  WOMRA:"ウーメラ (豪)",
+  WRAS:"Western Range Airspace",
+  WSC:"文昌衛星発射場 (中国)",
+  XICLF:"西昌衛星発射センター (中国)",
+  YAVNE:"ヤヴネ (イスラエル)",
+  YSLA:"黄海洋上射場 (中国)",
+  YUN:"西海衛星発射場 (北朝鮮)"
+};
+
+const GP_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle";
+const SATCAT_BASE = "https://celestrak.org/satcat/records.php?FORMAT=CSV&INTDES=";
+
+const PROXY_BUILDERS = [
+  (url) => url,
+  (url) => "https://corsproxy.io/?url=" + encodeURIComponent(url),
+  (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+  (url) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url),
+];
+
+let lastSuccessMethod = "";
+let allRecords = [];
+
+async function fetchWithTimeout(url, ms){
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("タイムアウト")), ms);
+  });
+  return Promise.race([ fetch(url, {cache:"no-store"}), timeout ]);
+}
+
+async function fetchText(url){
+  let lastErr = null;
+  for(let i=0; i<PROXY_BUILDERS.length; i++){
+    const attemptUrl = PROXY_BUILDERS[i](url);
+    try{
+      const r = await fetchWithTimeout(attemptUrl, 9000);
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      const text = await r.text();
+      if(!text || text.trim().length === 0) throw new Error("空レスポンス");
+      lastSuccessMethod = i === 0 ? "直接アクセス" : "プロキシ("+i+"番目)";
+      return text;
+    }catch(e){
+      lastErr = e;
+      continue;
+    }
+  }
+  throw new Error("全ての取得方法が失敗しました（直接アクセス＋プロキシ3種）: " + (lastErr ? lastErr.message : "不明"));
+}
+
+function parseTLEBlock(text){
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+  const records = [];
+  for(let i=0; i+2 < lines.length; i+=3){
+    const name = lines[i].trim();
+    const l1 = lines[i+1];
+    const l2 = lines[i+2];
+    if(!l1.startsWith("1 ") || !l2.startsWith("2 ")) continue;
+    const noradId = l1.substring(2,7).trim();
+    const desigRaw = l1.substring(9,17).trim();
+    let intdes = "";
+    if(desigRaw.length >= 5){
+      const yy = parseInt(desigRaw.substring(0,2),10);
+      const year = yy < 57 ? 2000+yy : 1900+yy;
+      const num = desigRaw.substring(2,5);
+      intdes = year + "-" + num;
+    }
+    records.push({ noradId, name, l1, l2, intdes, launchDate:"", launchSite:"" });
+  }
+  return records;
+}
+
+function parseCSV(text){
+  const lines = text.split(/\r?\n/).filter(l => l.length>0);
+  if(lines.length === 0) return [];
+  const headers = lines[0].split(",").map(h=>h.trim());
+  const idx = {};
+  headers.forEach((h,i)=> idx[h]=i);
+  const rows = [];
+  for(let i=1;i<lines.length;i++){
+    const cols = lines[i].split(",");
+    rows.push({
+      noradId: (cols[idx["NORAD_CAT_ID"]]||"").trim(),
+      launchDate: (cols[idx["LAUNCH_DATE"]]||"").trim(),
+      launchSite: (cols[idx["LAUNCH_SITE"]]||"").trim()
+    });
+  }
+  return rows;
+}
+
+function setStatus(text, cls){
+  document.getElementById("statusText").textContent = text;
+  const dot = document.getElementById("statusDot");
+  dot.className = "dot" + (cls ? " "+cls : "");
+}
+
+function showBanner(msg, isError){
+  const b = document.getElementById("banner");
+  b.textContent = msg;
+  b.className = "banner show" + (isError ? " error" : "");
+}
+function hideBanner(){
+  document.getElementById("banner").className = "banner";
+}
+
+async function runDiagnostic(){
+  const box = document.getElementById("diagBanner");
+  box.className = "banner show";
+  box.textContent = "診断中…";
+
+  const tests = [
+    { label: "fetch API自体", url: null },
+    { label: "GitHub API (CORS対応の定番)", url: "https://api.github.com/zen" },
+    { label: "CelesTrak 直接", url: "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle" },
+    { label: "corsproxy.io 経由 GitHub", url: "https://corsproxy.io/?url=" + encodeURIComponent("https://api.github.com/zen") },
+  ];
+
+  let lines = [];
+  for(const t of tests){
+    if(t.url === null){
+      lines.push("✅ "+t.label+"：利用可能");
+      continue;
+    }
+    try{
+      const r = await fetchWithTimeout(t.url, 7000);
+      lines.push((r.ok ? "✅ " : "⚠️ ") + t.label + "：HTTP " + r.status);
+    }catch(e){
+      lines.push("❌ " + t.label + "：失敗（" + e.message + "）");
+    }
+  }
+  box.textContent = lines.join("\n");
+}
+
+async function runUpdate(){
+  const btn = document.getElementById("refreshBtn");
+  btn.disabled = true;
+  hideBanner();
+  setStatus("取得中…");
+  document.getElementById("emptyMsg").style.display = "none";
+  document.getElementById("cards").innerHTML = "";
+  document.getElementById("countLine").style.display = "none";
+
+  try{
+    const tleText = await fetchText(GP_URL);
+    const records = parseTLEBlock(tleText);
+    if(records.length === 0){
+      throw new Error("TLEデータを解析できませんでした（0件）");
+    }
+
+    const uniqueIntdes = [...new Set(records.map(r=>r.intdes).filter(Boolean))];
+    const satcatMap = {};
+
+    const results = await Promise.allSettled(
+      uniqueIntdes.map(async (intdes) => {
+        const csv = await fetchText(SATCAT_BASE + encodeURIComponent(intdes));
+        return parseCSV(csv);
+      })
+    );
+    results.forEach(res=>{
+      if(res.status === "fulfilled"){
+        res.value.forEach(row=>{
+          satcatMap[row.noradId] = row;
+        });
+      }
+    });
+
+    records.forEach(r=>{
+      const m = satcatMap[r.noradId];
+      if(m){
+        r.launchDate = m.launchDate || "";
+        r.launchSite = m.launchSite || "";
+      }
+    });
+
+    allRecords = records;
+
+    const failedSatcat = results.filter(r=>r.status==="rejected").length;
+    if(failedSatcat > 0){
+      showBanner("一部の打ち上げ（"+failedSatcat+"件）について打ち上げ日・場所の取得に失敗しました。再度「更新」を試してください。", true);
+    } else if(lastSuccessMethod && lastSuccessMethod !== "直接アクセス"){
+      showBanner("CelesTrakへの直接アクセスがブロックされたため、外部プロキシ経由（"+lastSuccessMethod+"）で取得しました。プロキシは不安定な外部サービスのため、失敗する日もあります。", false);
+    }
+
+    setStatus(records.length + "件取得（"+ new Date().toLocaleString("ja-JP") +"）", "ok");
+    applyFilters();
+  }catch(e){
+    setStatus("取得失敗", "err");
+    showBanner("データ取得に失敗しました： " + e.message + "　（ネットワーク設定またはCelesTrak側の一時的な問題の可能性があります）", true);
+    document.getElementById("emptyMsg").style.display = "block";
+    document.getElementById("emptyMsg").textContent = "取得に失敗しました。「更新」をもう一度押してください。";
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+function clearFilters(){
+  document.getElementById("dateFrom").value = "";
+  document.getElementById("dateTo").value = "";
+  document.getElementById("idSearch").value = "";
+  document.getElementById("limitInput").value = "";
+  applyFilters();
+}
+
+function applyFilters(){
+  const from = document.getElementById("dateFrom").value;
+  const to = document.getElementById("dateTo").value;
+  const idQuery = document.getElementById("idSearch").value.trim();
+
+  let filtered = allRecords.filter(r=>{
+    if(idQuery && !r.noradId.includes(idQuery)) return false;
+    if(from && r.launchDate){
+      if(r.launchDate.substring(0,10) < from) return false;
+    }
+    if(to && r.launchDate){
+      if(r.launchDate.substring(0,10) > to) return false;
+    }
+    return true;
+  });
+
+  filtered.sort((a,b)=>{
+    if(a.intdes !== b.intdes) return b.intdes.localeCompare(a.intdes);
+    return b.noradId.localeCompare(a.noradId);
+  });
+
+  const limitRaw = document.getElementById("limitInput").value.trim();
+  const limit = limitRaw ? parseInt(limitRaw, 10) : 10;
+  const totalFiltered = filtered.length;
+  const shown = (limit > 0 && !isNaN(limit)) ? filtered.slice(0, limit) : filtered;
+
+  renderCards(shown, totalFiltered);
+}
+
+function renderCards(list, totalFiltered){
+  const wrap = document.getElementById("cards");
+  const countLine = document.getElementById("countLine");
+  const emptyMsg = document.getElementById("emptyMsg");
+  wrap.innerHTML = "";
+
+  if(allRecords.length === 0){
+    countLine.style.display = "none";
+    return;
+  }
+
+  countLine.style.display = "flex";
+  countLine.innerHTML = "<span>表示中: "+list.length+" / 条件一致 "+totalFiltered+" 件（全"+allRecords.length+"件中）</span><span>過去30日分</span>";
+
+  if(list.length === 0){
+    emptyMsg.style.display = "block";
+    emptyMsg.textContent = "条件に一致するオブジェクトがありません";
+    return;
+  }
+  emptyMsg.style.display = "none";
+
+  const now = Date.now();
+  list.forEach(r=>{
+    const card = document.createElement("div");
+    let isFresh = false;
+    if(r.launchDate){
+      const t = Date.parse(r.launchDate);
+      if(!isNaN(t) && (now - t) < 1000*60*60*48) isFresh = true;
+    }
+    card.className = "card" + (isFresh ? " fresh" : "");
+
+    const siteLabel = r.launchSite
+      ? (LAUNCH_SITES[r.launchSite] ? LAUNCH_SITES[r.launchSite] + " ["+r.launchSite+"]" : r.launchSite + "（コード未登録）")
+      : "（未登録）";
+
+    card.innerHTML = `
+      <div class="card-top">
+        <span class="card-name">${escapeHtml(r.name)}</span>
+        ${isFresh ? '<span class="fresh-tag">48h以内</span>' : ''}
+      </div>
+      <div class="meta-grid">
+        <div><div class="k">NORAD ID</div><div class="v">${r.noradId}</div></div>
+        <div><div class="k">国際符号</div><div class="v">${r.intdes || "-"}</div></div>
+        <div><div class="k">打ち上げ日</div><div class="v">${r.launchDate ? r.launchDate.substring(0,10) : "（未登録）"}</div></div>
+        <div><div class="k">打ち上げ場所</div><div class="v">${siteLabel}</div></div>
+      </div>
+      <div class="tle-block">${r.l1}<br>${r.l2}</div>
+      <button class="copy-btn" data-tle="${escapeAttr(r.l1+"\\n"+r.l2)}">TLEをコピー</button>
+    `;
+    wrap.appendChild(card);
+  });
+
+  wrap.querySelectorAll(".copy-btn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const tle = btn.getAttribute("data-tle").replace(/\\n/g,"\n");
+      navigator.clipboard.writeText(tle).then(()=>{
+        btn.textContent = "コピーしました";
+        setTimeout(()=>{ btn.textContent = "TLEをコピー"; }, 1500);
+      }).catch(()=>{
+        btn.textContent = "コピー失敗";
+      });
+    });
+  });
+}
+
+function escapeHtml(s){
+  return (s||"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function escapeAttr(s){
+  return escapeHtml(s).replace(/\n/g,"\\n");
+}
+
+document.getElementById("dateFrom").addEventListener("change", applyFilters);
+document.getElementById("dateTo").addEventListener("change", applyFilters);
+document.getElementById("idSearch").addEventListener("input", applyFilters);
+document.getElementById("limitInput").addEventListener("input", applyFilters);
+
+window.addEventListener("DOMContentLoaded", runUpdate);
+</script>
+</body>
+</html>
