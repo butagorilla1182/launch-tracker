@@ -381,12 +381,13 @@ const GP_JSON_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-d
 const GP_TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle";
 const SATCAT_BASE = "https://celestrak.org/satcat/records.php?FORMAT=CSV&INTDES=";
 
-const PROXY_BUILDERS = [
-  (url) => url,
-  (url) => "https://corsproxy.io/?url=" + encodeURIComponent(url),
-  (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
-  (url) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url),
-];
+ const PROXY_BUILDERS = [
+   (url) => url,
+-  (url) => "https://corsproxy.io/?url=" + encodeURIComponent(url),
+   (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+   (url) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url),
+ ];
+
 
 let lastSuccessMethod = "";
 let allRecords = [];
