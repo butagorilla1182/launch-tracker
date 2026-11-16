@@ -380,6 +380,8 @@ populateCountrySelect();
 const GP_JSON_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=json";
 const GP_TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=tle";
 const SATCAT_BASE = "https://celestrak.org/satcat/records.php?FORMAT=CSV&INTDES=";
+/* 直近30日分のSATCATを1回でまとめて取得（以前は打ち上げごとに数十回呼んでいて遅かった） */
+const SATCAT_GROUP_URL = "https://celestrak.org/satcat/records.php?GROUP=last-30-days&FORMAT=CSV";
 
  const PROXY_BUILDERS = [
    (url) => url,
@@ -404,6 +406,12 @@ async function fetchText(url){
     const attemptUrl = PROXY_BUILDERS[i](url);
     try{
       const r = await fetchWithTimeout(attemptUrl, 9000);
+      /* 直接アクセスで404＝「データが無い」が確定。プロキシで再試行しても同じなので打ち切る */
+      if(i === 0 && r.status === 404){
+        const e404 = new Error("HTTP 404（データなし）");
+        e404.noRetry = true;
+        throw e404;
+      }
       if(!r.ok) throw new Error("HTTP "+r.status);
       const text = await r.text();
       if(!text || text.trim().length === 0) throw new Error("空レスポンス");
@@ -411,9 +419,11 @@ async function fetchText(url){
       return text;
     }catch(e){
       lastErr = e;
+      if(e.noRetry) break;
       continue;
     }
   }
+  if(lastErr && lastErr.noRetry) throw lastErr;
   throw new Error("全ての取得方法が失敗しました（直接アクセス＋プロキシ3種）: " + (lastErr ? lastErr.message : "不明"));
 }
 
@@ -467,6 +477,26 @@ function parseGPJson(text){
   });
 }
 
+/* ダブルクォートで囲まれたカンマ（衛星名に入ることがある）を区切りとして扱わない */
+function splitCSVLine(line){
+  const out = [];
+  let cur = "", q = false;
+  for(let i=0;i<line.length;i++){
+    const c = line[i];
+    if(q){
+      if(c === '"' && line[i+1] === '"'){ cur += '"'; i++; }
+      else if(c === '"'){ q = false; }
+      else cur += c;
+    }else{
+      if(c === '"') q = true;
+      else if(c === ","){ out.push(cur); cur = ""; }
+      else cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
 function parseCSV(text){
   const lines = text.split(/\r?\n/).filter(l => l.length>0);
   if(lines.length === 0) return [];
@@ -475,7 +505,7 @@ function parseCSV(text){
   headers.forEach((h,i)=> idx[h]=i);
   const rows = [];
   for(let i=1;i<lines.length;i++){
-    const cols = lines[i].split(",");
+    const cols = splitCSVLine(lines[i]);
     rows.push({
       noradId: (cols[idx["NORAD_CAT_ID"]]||"").trim(),
       launchDate: (cols[idx["LAUNCH_DATE"]]||"").trim(),
@@ -550,7 +580,8 @@ async function runUpdate(){
       const tleText = await fetchText(GP_TLE_URL);
       tleMap = parseTLEBlockToMap(tleText);
     }catch(e){
-      tleFailed = true;
+      /* 404は「TLE形式のデータが無い」（6桁カタログ番号の物体はTLE非対応）なので警告しない */
+      tleFailed = !e.noRetry;
     }
     records.forEach(r=>{
       const t = tleMap[r.noradId];
@@ -561,11 +592,23 @@ async function runUpdate(){
       }
     });
 
-    const uniqueIntdes = [...new Set(records.map(r=>r.intdes).filter(Boolean))];
     const satcatMap = {};
 
+    /* ① まず直近30日分をまとめて1回で取得 */
+    try{
+      const bulkCsv = await fetchText(SATCAT_GROUP_URL);
+      parseCSV(bulkCsv).forEach(row=>{ if(row.noradId) satcatMap[row.noradId] = row; });
+    }catch(e){
+      console.warn("SATCAT一括取得に失敗。打ち上げごとの取得に切り替えます:", e);
+    }
+
+    /* ② 一括で取れなかった物体の分だけ、打ち上げごとに取得（従来の方法） */
+    const missingIntdes = [...new Set(
+      records.filter(r=>r.intdes && !satcatMap[r.noradId]).map(r=>r.intdes)
+    )];
+
     const results = await Promise.allSettled(
-      uniqueIntdes.map(async (intdes) => {
+      missingIntdes.map(async (intdes) => {
         const csv = await fetchText(SATCAT_BASE + encodeURIComponent(intdes));
         return parseCSV(csv);
       })
